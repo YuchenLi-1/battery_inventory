@@ -164,6 +164,22 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
 .import-info{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;font-size:.88rem;line-height:1.6}
 .import-info strong{color:var(--primary)}
 
+/* ── Panel tabs ── */
+.panel-tabs{display:flex;border-bottom:2px solid var(--border);margin:-20px -20px 16px;padding:0 20px}
+.panel-tab{flex:1;padding:10px 4px;text-align:center;cursor:pointer;font-size:.8rem;font-weight:600;
+  color:var(--muted);border-bottom:2.5px solid transparent;margin-bottom:-2px;transition:color .15s}
+.panel-tab:hover{color:var(--text)}
+.panel-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ── Defect types ── */
+.defect-block{border:1.5px solid var(--border);border-radius:9px;padding:12px;margin-bottom:10px;background:#fafcff}
+.defect-block-hdr{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.defect-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.defect-name{font-weight:700;font-size:.85rem;color:var(--text);flex:1}
+.defect-count{background:#e2e8f0;color:#475569;padding:2px 8px;border-radius:99px;font-size:.7rem;font-weight:700}
+.defect-empty{text-align:center;color:var(--muted);padding:28px 10px;font-size:.82rem}
+.defect-badge-cell{display:inline-block;padding:2px 9px;border-radius:99px;font-size:.74rem;font-weight:700;border:1px solid rgba(0,0,0,.08)}
+
 /* ── Print ── */
 .print-only{display:none}
 @media print{
@@ -234,7 +250,13 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
 
     <!-- ── Left: Form ── -->
     <div class="card no-print">
-      <div class="card-title">➕ Add Battery</div>
+      <div class="panel-tabs">
+        <div class="panel-tab active" id="ptab-add"    onclick="switchTab('add')">➕ Add Battery</div>
+        <div class="panel-tab"        id="ptab-defect" onclick="switchTab('defect')">🏷 Defect Types</div>
+      </div>
+
+      <!-- ── Tab: Add Battery ── -->
+      <div id="tab-add">
       <div class="status" id="status"></div>
       <div class="form-grid">
 
@@ -284,6 +306,26 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
         <button class="btn btn-primary" onclick="addBattery()">Add Battery</button>
         <button class="btn btn-ghost"   onclick="clearForm()">Clear</button>
       </div>
+      </div><!-- end tab-add -->
+
+      <!-- ── Tab: Defect Types ── -->
+      <div id="tab-defect" style="display:none">
+        <div class="fg" style="margin-bottom:14px">
+          <label>New Defect Type Name</label>
+          <div style="display:flex;gap:6px">
+            <input type="text" id="new-defect-name" placeholder="e.g. Dent, Low OCV, Leak…"
+              onkeydown="if(event.key==='Enter')addDefectType()"/>
+            <button class="btn btn-primary" onclick="addDefectType()" style="white-space:nowrap;padding:9px 14px">Add</button>
+          </div>
+        </div>
+        <div id="defect-list">
+          <div class="defect-empty" id="defect-empty-msg">
+            <div style="font-size:1.8rem;margin-bottom:6px;opacity:.3">🏷</div>
+            No defect types yet.<br>Add one above.
+          </div>
+        </div>
+      </div><!-- end tab-defect -->
+
     </div>
 
     <!-- ── Right: List ── -->
@@ -365,6 +407,9 @@ let undoTimer    = null;
 let stTimer      = null;
 let pendingImport= null;
 let reader       = null;
+let defectTypes  = [];
+
+const DEFECT_COLORS = ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#14b8a6'];
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.getElementById('hdr-date').textContent = new Date().toLocaleDateString('en-US',
@@ -372,6 +417,7 @@ document.getElementById('hdr-date').textContent = new Date().toLocaleDateString(
 loadState();
 renderTable();
 updateStats();
+renderDefectList();
 
 // ── Keyboard flow: Enter moves between form fields, final field triggers add ──
 ['mfgId','titanId','ocv','weight','comments'].forEach((id, i, arr) => {
@@ -395,7 +441,7 @@ document.getElementById('ocv').addEventListener('keydown', e => {
 function saveState() {
   try {
     localStorage.setItem('titan_inv', JSON.stringify({
-      batteries, nextId,
+      batteries, nextId, defectTypes,
       batchName: document.getElementById('batch-name').value || ''
     }));
   } catch(_) {}
@@ -406,8 +452,9 @@ function loadState() {
     const s = localStorage.getItem('titan_inv');
     if (!s) return;
     const d = JSON.parse(s);
-    batteries = (d.batteries || []).map(b => ({flag:'Pass', ...b}));
-    nextId    = d.nextId || 1;
+    batteries   = (d.batteries   || []).map(b => ({flag:'Pass', defect:'', ...b}));
+    defectTypes = (d.defectTypes || []);
+    nextId      = d.nextId || 1;
     if (d.batchName) document.getElementById('batch-name').value = d.batchName;
     document.getElementById('titanId').value = nextId;
   } catch(_) {}
@@ -484,12 +531,15 @@ function editRow(i) {
   const row = document.getElementById('row-'+i);
   const flagOpts = ['Pass','Suspect','Fail'].map(f =>
     `<option value="${f}"${(b.flag||'Pass')===f?' selected':''}>${f}</option>`).join('');
+  const defectOpts = ['', ...defectTypes.map(d=>d.name)].map(n =>
+    `<option value="${n}"${(b.defect||'')===n?' selected':''}>${n||'— None —'}</option>`).join('');
   row.innerHTML = `
     <td><input class="tbl-input" id="e-tid"    value="${esc(b.titanId)}"    style="width:65px"/></td>
     <td><input class="tbl-input" id="e-mfg"    value="${esc(b.mfgId)}"     style="width:100%"/></td>
     <td><input class="tbl-input" id="e-ocv"    value="${b.ocv}"   type="number" step="0.001" style="width:72px"/></td>
     <td><input class="tbl-input" id="e-weight" value="${b.weight}" type="number" step="0.1"  style="width:72px"/></td>
-    <td><select class="tbl-input" id="e-flag" style="width:88px">${flagOpts}</select></td>
+    <td><select class="tbl-input" id="e-flag"   style="width:88px">${flagOpts}</select></td>
+    <td><select class="tbl-input" id="e-defect" style="width:100px">${defectOpts}</select></td>
     <td><input class="tbl-input" id="e-cmt"    value="${esc(b.comments||'')}"               style="width:100%"/></td>
     <td style="color:#64748b;font-size:.76rem;white-space:nowrap">${b.date}</td>
     <td style="white-space:nowrap">
@@ -511,9 +561,10 @@ function saveRow(i) {
   const ocv = document.getElementById('e-ocv').value.trim();
   const wt  = document.getElementById('e-weight').value.trim();
   const flg = document.getElementById('e-flag').value;
+  const def = document.getElementById('e-defect').value;
   const cmt = document.getElementById('e-cmt').value.trim();
   if (!tid || !mfg || !ocv || !wt) { showStatus('All fields except Comments are required.', 'error'); return; }
-  batteries[i] = {...batteries[i], titanId:tid, mfgId:mfg, ocv:parseFloat(ocv), weight:parseFloat(wt), flag:flg, comments:cmt};
+  batteries[i] = {...batteries[i], titanId:tid, mfgId:mfg, ocv:parseFloat(ocv), weight:parseFloat(wt), flag:flg, defect:def, comments:cmt};
   renderTable();
   showStatus(`Battery "${tid}" updated.`, 'success');
 }
@@ -618,6 +669,7 @@ function renderTable() {
     {key:'ocv',     label:'OCV (V)'},
     {key:'weight',  label:'Weight (g)'},
     {key:'flag',    label:'Flag'},
+    {key:'defect',  label:'Defect'},
     {key:'comments',label:'Comments'},
     {key:'date',    label:'Date Added'},
   ];
@@ -635,6 +687,10 @@ function renderTable() {
     const wtCls  = oos.weight.has(i) ? ' oos-cell' : '';
     const ocvTip = oos.ocv.has(i)    ? ' title="Out of spec (>2σ from batch avg)"' : '';
     const wtTip  = oos.weight.has(i) ? ' title="Out of spec (>2σ from batch avg)"' : '';
+    const dt    = defectTypes.find(d => d.name === b.defect);
+    const defectHtml = b.defect
+      ? `<span class="defect-badge-cell" style="background:${dt?dt.color+'22':'#f1f5f9'};color:${dt?dt.color:'#475569'};border-color:${dt?dt.color+'55':'#e2e8f0'}">${esc(b.defect)}</span>`
+      : '<span style="color:#94a3b8">—</span>';
     tbody += `
       <tr id="row-${i}">
         <td><span class="badge">#${esc(b.titanId)}</span></td>
@@ -642,6 +698,7 @@ function renderTable() {
         <td class="${ocvCls}"${ocvTip}>${b.ocv}</td>
         <td class="${wtCls}"${wtTip}>${b.weight}</td>
         <td><span class="${fc}">${esc(b.flag||'Pass')}</span></td>
+        <td>${defectHtml}</td>
         <td>${b.comments ? esc(b.comments) : '<span style="color:#94a3b8">—</span>'}</td>
         <td style="white-space:nowrap;color:#64748b;font-size:.76rem">${b.date}</td>
         <td class="no-print" style="white-space:nowrap">
@@ -796,6 +853,108 @@ function showStatus(msg, type) {
   stTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
+// ── Tab switching ─────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('tab-add').style.display    = tab === 'add'    ? '' : 'none';
+  document.getElementById('tab-defect').style.display = tab === 'defect' ? '' : 'none';
+  document.getElementById('ptab-add').classList.toggle('active',    tab === 'add');
+  document.getElementById('ptab-defect').classList.toggle('active', tab === 'defect');
+}
+
+// ── Defect types ───────────────────────────────────────────────────────────
+function addDefectType() {
+  const inp  = document.getElementById('new-defect-name');
+  const name = inp.value.trim();
+  if (!name) return;
+  if (defectTypes.find(d => d.name.toLowerCase() === name.toLowerCase())) {
+    showStatus('Defect type already exists.', 'error'); return;
+  }
+  defectTypes.push({
+    id:    Date.now().toString(),
+    name,
+    color: DEFECT_COLORS[defectTypes.length % DEFECT_COLORS.length]
+  });
+  inp.value = '';
+  renderDefectList();
+  saveState();
+}
+
+function removeDefectType(id) {
+  const dt = defectTypes.find(d => d.id === id);
+  if (!dt) return;
+  batteries.forEach(b => { if (b.defect === dt.name) b.defect = ''; });
+  defectTypes = defectTypes.filter(d => d.id !== id);
+  renderDefectList();
+  renderTable();
+  saveState();
+}
+
+function clearDefectAssignments(id) {
+  const dt = defectTypes.find(d => d.id === id);
+  if (!dt) return;
+  batteries.forEach(b => { if (b.defect === dt.name) b.defect = ''; });
+  renderDefectList();
+  renderTable();
+  saveState();
+  showStatus(`Cleared all "${dt.name}" assignments.`, 'success');
+}
+
+function assignDefect(id) {
+  const dt  = defectTypes.find(d => d.id === id);
+  if (!dt) return;
+  const raw = document.getElementById('dpaste-' + id).value;
+  const ids = raw.split(/[\n,;\t]+/).map(s => s.trim()).filter(Boolean);
+  if (!ids.length) { showStatus('Paste some IDs first.', 'error'); return; }
+  let matched = 0;
+  ids.forEach(qid => {
+    const q = qid.toLowerCase();
+    batteries.forEach(b => {
+      if ((b.mfgId||'').toLowerCase() === q || String(b.titanId).toLowerCase() === q) {
+        b.defect = dt.name; matched++;
+      }
+    });
+  });
+  document.getElementById('dpaste-' + id).value = '';
+  renderDefectList();
+  renderTable();
+  saveState();
+  showStatus(
+    matched ? `Assigned "${dt.name}" to ${matched} batter${matched===1?'y':'ies'}.` : 'No matching IDs found.',
+    matched ? 'success' : 'error'
+  );
+}
+
+function renderDefectList() {
+  const el    = document.getElementById('defect-list');
+  const empty = document.getElementById('defect-empty-msg');
+  if (!el) return;
+  if (!defectTypes.length) {
+    el.innerHTML = `<div class="defect-empty" id="defect-empty-msg"><div style="font-size:1.8rem;margin-bottom:6px;opacity:.3">🏷</div>No defect types yet.<br>Add one above.</div>`;
+    return;
+  }
+  const counts = {};
+  batteries.forEach(b => { if (b.defect) counts[b.defect] = (counts[b.defect]||0) + 1; });
+
+  el.innerHTML = defectTypes.map(dt => `
+    <div class="defect-block">
+      <div class="defect-block-hdr">
+        <div class="defect-dot" style="background:${dt.color}"></div>
+        <span class="defect-name">${esc(dt.name)}</span>
+        <span class="defect-count">${counts[dt.name]||0} cells</span>
+        <button class="btn btn-ghost" style="padding:3px 8px;font-size:.7rem;margin-left:4px"
+          onclick="clearDefectAssignments('${dt.id}')" title="Remove all assignments">Clear</button>
+        <button class="btn btn-danger" style="padding:3px 8px;font-size:.7rem"
+          onclick="removeDefectType('${dt.id}')" title="Delete defect type">✕</button>
+      </div>
+      <textarea id="dpaste-${dt.id}" rows="3"
+        style="width:100%;font-size:.78rem;font-family:'Courier New',monospace;resize:vertical;
+               padding:7px 9px;border:1.5px solid var(--border);border-radius:6px;outline:none"
+        placeholder="Paste Manufacturer IDs here (one per line)…"></textarea>
+      <button class="btn btn-primary" style="width:100%;margin-top:7px;padding:8px"
+        onclick="assignDefect('${dt.id}')">Assign to Pasted IDs</button>
+    </div>`).join('');
+}
+
 // ── Util ───────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -830,7 +989,7 @@ def export():
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
     # Row 1: Title
-    ws.merge_cells('A1:G1')
+    ws.merge_cells('A1:H1')
     ws['A1'] = 'Battery Inventory — Titan AES'
     ws['A1'].font      = Font(name='Calibri', size=14, bold=True, color=C_WHITE)
     ws['A1'].fill      = fill(C_NAVY)
@@ -846,7 +1005,7 @@ def export():
         ws.cell(r, 2, v).font = Font(color='1E293B', size=10)
 
     # Row 6: Column headers
-    headers = ['Titan ID','Manufacturer ID','OCV (V)','Weight (g)','Flag','Comments','Date Added']
+    headers = ['Titan ID','Manufacturer ID','OCV (V)','Weight (g)','Flag','Defect Type','Comments','Date Added']
     for c, h in enumerate(headers, 1):
         hdr(ws.cell(6, c, h), bg=C_BLUE)
     ws.row_dimensions[6].height = 20
@@ -856,7 +1015,8 @@ def export():
     for ri, b in enumerate(batteries, 7):
         vals = [b['titanId'], b['mfgId'],
                 float(b['ocv']), float(b['weight']),
-                b.get('flag','Pass'), b.get('comments',''), b['date']]
+                b.get('flag','Pass'), b.get('defect',''),
+                b.get('comments',''), b['date']]
         stripe = fill(C_STRIPE if ri % 2 == 0 else C_WHITE)
         for ci, v in enumerate(vals, 1):
             cell = ws.cell(ri, ci, v)
@@ -866,15 +1026,19 @@ def export():
                 cell.fill = fill(flag_fills.get(str(v), C_WHITE))
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal='center', vertical='center')
+            elif ci == 6 and v:  # Defect column
+                cell.fill = fill('FEE2E2')
+                cell.font = Font(bold=True, color='991B1B')
+                cell.alignment = Alignment(horizontal='center', vertical='center')
             else:
                 cell.fill = stripe
 
     # Header border
-    for c in range(1, 8):
+    for c in range(1, 9):
         ws.cell(6, c).border = border
 
     # Column widths
-    for c, w in enumerate([12, 32, 11, 11, 12, 35, 22], 1):
+    for c, w in enumerate([12, 32, 11, 11, 12, 18, 35, 22], 1):
         ws.column_dimensions[get_column_letter(c)].width = w
 
     ws.freeze_panes = 'A7'
@@ -921,6 +1085,7 @@ def import_excel():
                 'ocv':      float(gv(row,'OCV (V)', 0) or 0),
                 'weight':   float(gv(row,'Weight (g)', 0) or 0),
                 'flag':     str(gv(row,'Flag','Pass') or 'Pass').strip(),
+                'defect':   str(gv(row,'Defect Type','') or '').strip(),
                 'comments': str(gv(row,'Comments','') or '').strip(),
                 'date':     str(gv(row,'Date Added','') or '').strip(),
             }
