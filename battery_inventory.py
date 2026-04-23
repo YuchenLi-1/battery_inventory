@@ -1106,8 +1106,11 @@ def index():
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    url = f'http://localhost:{PORT}'
+    import os
+    host = os.environ.get('HOST', 'localhost')
+    url  = f'http://localhost:{PORT}'
     print(f'  Battery Inventory  →  {url}')
     print('  Press Ctrl+C to stop.\n')
-    threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    app.run(host='localhost', port=PORT, debug=False, use_reloader=False)
+    if host == 'localhost':
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    app.run(host=host, port=PORT, debug=False, use_reloader=False)
