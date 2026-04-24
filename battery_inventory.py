@@ -108,6 +108,20 @@ input.has-btn{padding-right:82px}
 .status.success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}
 .status.error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
 
+/* ── Find bar ── */
+.find-bar{background:#fffbeb;border:1.5px solid #fde68a;border-radius:9px;padding:10px 12px;margin-bottom:10px}
+.find-input-wrap{position:relative;display:flex;align-items:center}
+.find-icon{position:absolute;left:9px;font-size:.85rem;pointer-events:none}
+.find-input-wrap input{width:100%;padding:8px 10px 8px 32px;border:1.5px solid #fde68a;border-radius:7px;
+  font-size:.88rem;outline:none;background:#fff}
+.find-input-wrap input:focus{border-color:var(--warn)}
+#find-result{margin-top:8px;font-size:.85rem;min-height:0}
+.find-hit{background:#fff;border:1.5px solid #fde68a;border-radius:7px;padding:8px 12px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.find-hit-box{font-weight:700;font-size:.95rem;color:var(--primary)}
+.find-hit-detail{color:var(--muted);font-size:.8rem}
+.find-miss{color:#92400e;font-size:.82rem;padding:4px 0}
+
 /* ── Toolbar ── */
 .toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
 .toolbar-filter{flex:1;min-width:160px;position:relative}
@@ -371,10 +385,20 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
         </div>
       </div>
 
+      <!-- Find cell lookup -->
+      <div class="find-bar no-print">
+        <div class="find-input-wrap">
+          <span class="find-icon">🔎</span>
+          <input type="text" id="find-input" placeholder="Find cell by ID — which box is it in?"
+            oninput="findCell(this.value)" autocomplete="off"/>
+        </div>
+        <div id="find-result"></div>
+      </div>
+
       <!-- Filter toolbar -->
       <div class="toolbar no-print">
         <div class="toolbar-filter">
-          <input type="text" id="filter-input" placeholder="Search Titan ID, Mfg ID, comments…" oninput="setFilter(this.value)"/>
+          <input type="text" id="filter-input" placeholder="Search Titan ID, Mfg ID, box, comments…" oninput="setFilter(this.value)"/>
         </div>
       </div>
 
@@ -889,6 +913,30 @@ function showStatus(msg, type) {
   el.style.display = 'flex';
   clearTimeout(stTimer);
   stTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+// ── Find cell ─────────────────────────────────────────────────────────────
+function findCell(q) {
+  const res = document.getElementById('find-result');
+  q = q.trim();
+  if (!q) { res.innerHTML = ''; return; }
+  const hit = batteries.find(b =>
+    (b.mfgId||'').toLowerCase() === q.toLowerCase() ||
+    String(b.titanId).toLowerCase() === q.toLowerCase()
+  );
+  if (!hit) {
+    res.innerHTML = `<div class="find-miss">No cell found matching "<strong>${esc(q)}</strong>"</div>`;
+    return;
+  }
+  const box    = hit.boxNumber ? `📦 <span class="find-hit-box">${esc(hit.boxNumber)}</span>` : '<span style="color:#92400e">Not assigned to a box</span>';
+  const flag   = hit.flag || 'Pass';
+  const fc     = {Pass:'flag-pass',Suspect:'flag-suspect',Fail:'flag-fail'}[flag]||'flag-pass';
+  res.innerHTML = `<div class="find-hit">
+    ${box}
+    <span class="find-hit-detail">Titan #${esc(hit.titanId)} &nbsp;·&nbsp; OCV ${hit.ocv}V &nbsp;·&nbsp; ${hit.weight}g</span>
+    <span class="${fc}" style="font-size:.74rem">${flag}</span>
+    ${hit.defect ? `<span class="defect-badge-cell" style="font-size:.74rem">${esc(hit.defect)}</span>` : ''}
+  </div>`;
 }
 
 // ── Boxes ──────────────────────────────────────────────────────────────────
