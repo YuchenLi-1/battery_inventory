@@ -29,6 +29,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Battery Inventory · Titan AES</title>
 <script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{
   --primary:#0c2143; --primary-dark:#081630;
@@ -164,6 +165,18 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
 .import-info{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;font-size:.88rem;line-height:1.6}
 .import-info strong{color:var(--primary)}
 
+/* ── Box styles ── */
+.box-block{border:1.5px solid var(--border);border-radius:9px;padding:14px;margin-bottom:10px;background:#fafcff}
+.box-block-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.box-title{font-weight:700;font-size:.92rem;color:var(--primary);flex:1}
+.box-count{background:#e2e8f0;color:#475569;padding:2px 9px;border-radius:99px;font-size:.72rem;font-weight:700}
+.box-qr{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:8px}
+.box-qr canvas{border:1px solid var(--border);border-radius:6px;padding:4px;background:#fff}
+.box-qr-label{font-size:.7rem;color:var(--muted)}
+.box-cells{margin-top:8px;font-size:.78rem;color:#475569;line-height:1.8;word-break:break-all}
+.box-badge{display:inline-block;background:#dbeafe;color:#1d4ed8;padding:1px 7px;border-radius:99px;
+  font-size:.74rem;font-weight:700;margin:1px}
+
 /* ── Panel tabs ── */
 .panel-tabs{display:flex;border-bottom:2px solid var(--border);margin:-20px -20px 16px;padding:0 20px}
 .panel-tab{flex:1;padding:10px 4px;text-align:center;cursor:pointer;font-size:.8rem;font-weight:600;
@@ -251,8 +264,9 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
     <!-- ── Left: Form ── -->
     <div class="card no-print">
       <div class="panel-tabs">
-        <div class="panel-tab active" id="ptab-add"    onclick="switchTab('add')">➕ Add Battery</div>
-        <div class="panel-tab"        id="ptab-defect" onclick="switchTab('defect')">🏷 Defect Types</div>
+        <div class="panel-tab active" id="ptab-add"    onclick="switchTab('add')">➕ Add</div>
+        <div class="panel-tab"        id="ptab-defect" onclick="switchTab('defect')">🏷 Defects</div>
+        <div class="panel-tab"        id="ptab-boxes"  onclick="switchTab('boxes')">📦 Boxes</div>
       </div>
 
       <!-- ── Tab: Add Battery ── -->
@@ -296,6 +310,12 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
           <div class="help-tip">Kept between entries.</div>
         </div>
 
+        <div class="fg">
+          <label>Box Number</label>
+          <input type="text" id="boxNumber" placeholder="e.g. BOX-001"/>
+          <div class="help-tip">Kept between entries.</div>
+        </div>
+
         <div class="fg full">
           <label>Comments <span style="font-weight:400;text-transform:none;font-size:.7rem">(optional — Enter to add)</span></label>
           <textarea id="comments" placeholder="Leave blank to skip…" rows="2"></textarea>
@@ -325,6 +345,16 @@ tbody td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:m
           </div>
         </div>
       </div><!-- end tab-defect -->
+
+      <!-- ── Tab: Boxes ── -->
+      <div id="tab-boxes" style="display:none">
+        <div id="box-list">
+          <div class="defect-empty" id="box-empty-msg">
+            <div style="font-size:1.8rem;margin-bottom:6px;opacity:.3">📦</div>
+            No boxes yet.<br>Add a Box Number when entering batteries.
+          </div>
+        </div>
+      </div><!-- end tab-boxes -->
 
     </div>
 
@@ -420,7 +450,7 @@ updateStats();
 renderDefectList();
 
 // ── Keyboard flow: Enter moves between form fields, final field triggers add ──
-['mfgId','titanId','ocv','weight','comments'].forEach((id, i, arr) => {
+['mfgId','titanId','ocv','weight','boxNumber','comments'].forEach((id, i, arr) => {
   document.getElementById(id).addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
@@ -462,12 +492,13 @@ function loadState() {
 
 // ── Add Battery ────────────────────────────────────────────────────────────
 function addBattery() {
-  const mfgId    = document.getElementById('mfgId').value.trim();
-  const titanId  = document.getElementById('titanId').value.trim();
-  const ocv      = document.getElementById('ocv').value.trim();
-  const weight   = document.getElementById('weight').value.trim();
-  const flag     = document.getElementById('flag').value;
-  const comments = document.getElementById('comments').value.trim();
+  const mfgId     = document.getElementById('mfgId').value.trim();
+  const titanId   = document.getElementById('titanId').value.trim();
+  const ocv       = document.getElementById('ocv').value.trim();
+  const weight    = document.getElementById('weight').value.trim();
+  const flag      = document.getElementById('flag').value;
+  const boxNumber = document.getElementById('boxNumber').value.trim();
+  const comments  = document.getElementById('comments').value.trim();
 
   if (!mfgId)   { showStatus('Manufacturer ID is required.', 'error'); return; }
   if (!titanId) { showStatus('Titan ID is required.', 'error'); return; }
@@ -488,7 +519,7 @@ function addBattery() {
 
   batteries.push({
     titanId, mfgId, ocv: parseFloat(ocv), weight: parseFloat(weight),
-    flag, comments,
+    flag, boxNumber, defect:'', comments,
     date: new Date().toLocaleString('en-US',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})
   });
 
@@ -505,7 +536,7 @@ function clearForm() {
   document.getElementById('titanId').value  = nextId;
   document.getElementById('flag').value     = 'Pass';
   document.getElementById('comments').value = '';
-  // OCV + Weight intentionally kept
+  // OCV, Weight, Box intentionally kept
   document.getElementById('mfgId').focus();
 }
 
@@ -539,6 +570,7 @@ function editRow(i) {
     <td><input class="tbl-input" id="e-ocv"    value="${b.ocv}"   type="number" step="0.001" style="width:72px"/></td>
     <td><input class="tbl-input" id="e-weight" value="${b.weight}" type="number" step="0.1"  style="width:72px"/></td>
     <td><select class="tbl-input" id="e-flag"   style="width:88px">${flagOpts}</select></td>
+    <td><input class="tbl-input" id="e-box"    value="${esc(b.boxNumber||'')}"              style="width:80px"/></td>
     <td><select class="tbl-input" id="e-defect" style="width:100px">${defectOpts}</select></td>
     <td><input class="tbl-input" id="e-cmt"    value="${esc(b.comments||'')}"               style="width:100%"/></td>
     <td style="color:#64748b;font-size:.76rem;white-space:nowrap">${b.date}</td>
@@ -561,10 +593,11 @@ function saveRow(i) {
   const ocv = document.getElementById('e-ocv').value.trim();
   const wt  = document.getElementById('e-weight').value.trim();
   const flg = document.getElementById('e-flag').value;
+  const box = document.getElementById('e-box').value.trim();
   const def = document.getElementById('e-defect').value;
   const cmt = document.getElementById('e-cmt').value.trim();
   if (!tid || !mfg || !ocv || !wt) { showStatus('All fields except Comments are required.', 'error'); return; }
-  batteries[i] = {...batteries[i], titanId:tid, mfgId:mfg, ocv:parseFloat(ocv), weight:parseFloat(wt), flag:flg, defect:def, comments:cmt};
+  batteries[i] = {...batteries[i], titanId:tid, mfgId:mfg, ocv:parseFloat(ocv), weight:parseFloat(wt), flag:flg, boxNumber:box, defect:def, comments:cmt};
   renderTable();
   showStatus(`Battery "${tid}" updated.`, 'success');
 }
@@ -664,14 +697,15 @@ function renderTable() {
   }
 
   const COLS = [
-    {key:'titanId', label:'Titan ID'},
-    {key:'mfgId',   label:'Manufacturer ID'},
-    {key:'ocv',     label:'OCV (V)'},
-    {key:'weight',  label:'Weight (g)'},
-    {key:'flag',    label:'Flag'},
-    {key:'defect',  label:'Defect'},
-    {key:'comments',label:'Comments'},
-    {key:'date',    label:'Date Added'},
+    {key:'titanId',   label:'Titan ID'},
+    {key:'mfgId',     label:'Manufacturer ID'},
+    {key:'ocv',       label:'OCV (V)'},
+    {key:'weight',    label:'Weight (g)'},
+    {key:'flag',      label:'Flag'},
+    {key:'boxNumber', label:'Box'},
+    {key:'defect',    label:'Defect'},
+    {key:'comments',  label:'Comments'},
+    {key:'date',      label:'Date Added'},
   ];
 
   const hdrs = COLS.map(c => {
@@ -691,6 +725,9 @@ function renderTable() {
     const defectHtml = b.defect
       ? `<span class="defect-badge-cell" style="background:${dt?dt.color+'22':'#f1f5f9'};color:${dt?dt.color:'#475569'};border-color:${dt?dt.color+'55':'#e2e8f0'}">${esc(b.defect)}</span>`
       : '<span style="color:#94a3b8">—</span>';
+    const boxHtml = b.boxNumber
+      ? `<span class="box-badge">${esc(b.boxNumber)}</span>`
+      : '<span style="color:#94a3b8">—</span>';
     tbody += `
       <tr id="row-${i}">
         <td><span class="badge">#${esc(b.titanId)}</span></td>
@@ -698,6 +735,7 @@ function renderTable() {
         <td class="${ocvCls}"${ocvTip}>${b.ocv}</td>
         <td class="${wtCls}"${wtTip}>${b.weight}</td>
         <td><span class="${fc}">${esc(b.flag||'Pass')}</span></td>
+        <td>${boxHtml}</td>
         <td>${defectHtml}</td>
         <td>${b.comments ? esc(b.comments) : '<span style="color:#94a3b8">—</span>'}</td>
         <td style="white-space:nowrap;color:#64748b;font-size:.76rem">${b.date}</td>
@@ -853,12 +891,89 @@ function showStatus(msg, type) {
   stTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
+// ── Boxes ──────────────────────────────────────────────────────────────────
+function renderBoxes() {
+  const el = document.getElementById('box-list');
+  if (!el) return;
+
+  // Group batteries by box
+  const map = {};
+  batteries.forEach(b => {
+    const bn = (b.boxNumber || '').trim();
+    if (!bn) return;
+    if (!map[bn]) map[bn] = [];
+    map[bn].push(b);
+  });
+
+  const boxes = Object.keys(map).sort();
+  if (!boxes.length) {
+    el.innerHTML = `<div class="defect-empty"><div style="font-size:1.8rem;margin-bottom:6px;opacity:.3">📦</div>No boxes yet.<br>Add a Box Number when entering batteries.</div>`;
+    return;
+  }
+
+  el.innerHTML = boxes.map(bn => {
+    const cells = map[bn];
+    const cellBadges = cells.map(b => `<span class="box-badge">#${esc(b.titanId)}</span>`).join(' ');
+    return `
+      <div class="box-block">
+        <div class="box-block-hdr">
+          <span class="box-title">📦 ${esc(bn)}</span>
+          <span class="box-count">${cells.length} cell${cells.length===1?'':'s'}</span>
+          <button class="btn btn-ghost" style="padding:3px 9px;font-size:.72rem"
+            onclick="filterByBox('${esc(bn)}')">View</button>
+        </div>
+        <div class="box-cells">${cellBadges}</div>
+        <div class="box-qr">
+          <div id="qr-${esc(bn).replace(/\s+/g,'-')}" style="line-height:0"></div>
+          <span class="box-qr-label">${esc(bn)}</span>
+          <button class="btn btn-ghost" style="padding:3px 9px;font-size:.72rem;margin-top:2px"
+            onclick="printQR('${esc(bn)}')">🖨 Print label</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Generate QR codes
+  boxes.forEach(bn => {
+    const divId = 'qr-' + bn.replace(/\s+/g,'-');
+    const div   = document.getElementById(divId);
+    if (div && typeof QRCode !== 'undefined') {
+      div.innerHTML = '';
+      new QRCode(div, { text: bn, width: 100, height: 100, correctLevel: QRCode.CorrectLevel.M });
+    }
+  });
+}
+
+function filterByBox(bn) {
+  document.getElementById('filter-input').value = bn;
+  setFilter(bn);
+  switchTab('add');
+  document.querySelector('[data-panel="list"]');
+}
+
+function printQR(bn) {
+  const divId = 'qr-' + bn.replace(/\s+/g,'-');
+  const div   = document.getElementById(divId);
+  if (!div) return;
+  const canvas = div.querySelector('canvas');
+  if (!canvas) return;
+  const win = window.open('', '_blank');
+  win.document.write(`<html><body style="text-align:center;font-family:sans-serif;padding:30px">
+    <img src="${canvas.toDataURL()}" style="width:180px;height:180px"><br>
+    <p style="font-size:1.1rem;font-weight:700;margin-top:12px">${bn}</p>
+    <script>window.onload=()=>{window.print();window.close()}<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────
 function switchTab(tab) {
   document.getElementById('tab-add').style.display    = tab === 'add'    ? '' : 'none';
   document.getElementById('tab-defect').style.display = tab === 'defect' ? '' : 'none';
+  document.getElementById('tab-boxes').style.display  = tab === 'boxes'  ? '' : 'none';
   document.getElementById('ptab-add').classList.toggle('active',    tab === 'add');
   document.getElementById('ptab-defect').classList.toggle('active', tab === 'defect');
+  document.getElementById('ptab-boxes').classList.toggle('active',  tab === 'boxes');
+  if (tab === 'boxes') renderBoxes();
 }
 
 // ── Defect types ───────────────────────────────────────────────────────────
@@ -989,7 +1104,7 @@ def export():
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
     # Row 1: Title
-    ws.merge_cells('A1:H1')
+    ws.merge_cells('A1:I1')
     ws['A1'] = 'Battery Inventory — Titan AES'
     ws['A1'].font      = Font(name='Calibri', size=14, bold=True, color=C_WHITE)
     ws['A1'].fill      = fill(C_NAVY)
@@ -1005,7 +1120,7 @@ def export():
         ws.cell(r, 2, v).font = Font(color='1E293B', size=10)
 
     # Row 6: Column headers
-    headers = ['Titan ID','Manufacturer ID','OCV (V)','Weight (g)','Flag','Defect Type','Comments','Date Added']
+    headers = ['Titan ID','Manufacturer ID','OCV (V)','Weight (g)','Flag','Box','Defect Type','Comments','Date Added']
     for c, h in enumerate(headers, 1):
         hdr(ws.cell(6, c, h), bg=C_BLUE)
     ws.row_dimensions[6].height = 20
@@ -1015,8 +1130,8 @@ def export():
     for ri, b in enumerate(batteries, 7):
         vals = [b['titanId'], b['mfgId'],
                 float(b['ocv']), float(b['weight']),
-                b.get('flag','Pass'), b.get('defect',''),
-                b.get('comments',''), b['date']]
+                b.get('flag','Pass'), b.get('boxNumber',''),
+                b.get('defect',''), b.get('comments',''), b['date']]
         stripe = fill(C_STRIPE if ri % 2 == 0 else C_WHITE)
         for ci, v in enumerate(vals, 1):
             cell = ws.cell(ri, ci, v)
@@ -1026,7 +1141,7 @@ def export():
                 cell.fill = fill(flag_fills.get(str(v), C_WHITE))
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal='center', vertical='center')
-            elif ci == 6 and v:  # Defect column
+            elif ci == 7 and v:  # Defect column
                 cell.fill = fill('FEE2E2')
                 cell.font = Font(bold=True, color='991B1B')
                 cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1034,11 +1149,11 @@ def export():
                 cell.fill = stripe
 
     # Header border
-    for c in range(1, 9):
+    for c in range(1, 10):
         ws.cell(6, c).border = border
 
     # Column widths
-    for c, w in enumerate([12, 32, 11, 11, 12, 18, 35, 22], 1):
+    for c, w in enumerate([12, 32, 11, 11, 12, 14, 18, 35, 22], 1):
         ws.column_dimensions[get_column_letter(c)].width = w
 
     ws.freeze_panes = 'A7'
@@ -1084,8 +1199,9 @@ def import_excel():
                 'mfgId':    str(gv(row,'Manufacturer ID') or '').strip(),
                 'ocv':      float(gv(row,'OCV (V)', 0) or 0),
                 'weight':   float(gv(row,'Weight (g)', 0) or 0),
-                'flag':     str(gv(row,'Flag','Pass') or 'Pass').strip(),
-                'defect':   str(gv(row,'Defect Type','') or '').strip(),
+                'flag':      str(gv(row,'Flag','Pass') or 'Pass').strip(),
+                'boxNumber': str(gv(row,'Box','') or '').strip(),
+                'defect':    str(gv(row,'Defect Type','') or '').strip(),
                 'comments': str(gv(row,'Comments','') or '').strip(),
                 'date':     str(gv(row,'Date Added','') or '').strip(),
             }
